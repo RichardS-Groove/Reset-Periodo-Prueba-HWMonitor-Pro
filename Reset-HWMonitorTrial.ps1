@@ -1,13 +1,13 @@
 # Script: Reset-HWMonitorTrial.ps1
-# Autor: Richard Campos - Ethical Hacker Senior
-# Descripción: Restablece el período de prueba de HWMonitor Pro eliminando claves del registro y archivos de configuración.
+# Autor: Ethical Hacker Senior
+# Descripción: Rastrea y elimina todas las claves del registro y archivos relacionados con HWMonitor Pro para restablecer el período de prueba.
 # Uso: Ejecutar como administrador en un entorno controlado y con fines educativos.
 
 # Configuración inicial
 $scriptName = "Reset-HWMonitorTrial"
 $logFile = "$env:TEMP\$scriptName.log"
-$regPath = "HKCU:\Software\HWMonitor"
-$appDataPath = "$env:LocalAppData\HWMonitor"
+$searchKeyword = "HWMonitor"
+$backupPath = "$env:TEMP\HWMonitorBackup"
 
 # Función para escribir logs
 function Write-Log {
@@ -23,77 +23,108 @@ function Write-Log {
 
 # Función para detener procesos de HWMonitor
 function Stop-HWMonitorProcesses {
+    Write-Log "Buscando y deteniendo procesos de HWMonitor..."
+
     try {
-        $processes = Get-Process -Name "HWMonitor" -ErrorAction SilentlyContinue
+        $processes = Get-Process -Name "*HWMonitor*" -ErrorAction SilentlyContinue
         if ($processes) {
-            Write-Log "Deteniendo procesos de HWMonitor..."
-            Stop-Process -Name "HWMonitor" -Force -ErrorAction Stop
-            Write-Log "Procesos de HWMonitor detenidos correctamente."
+            Write-Log "Procesos encontrados: $($processes.Count). Deteniéndolos..."
+            Stop-Process -Name "*HWMonitor*" -Force -ErrorAction Stop
+            Write-Log "Procesos detenidos correctamente."
         } else {
             Write-Log "No se encontraron procesos de HWMonitor en ejecución."
         }
     } catch {
         Write-Log "Error al detener los procesos de HWMonitor: $_" -level "ERROR"
-        throw
     }
 }
 
-# Función para eliminar claves del registro
-function Remove-RegistryKeys {
+# Función para realizar backups de claves y archivos encontrados
+function Backup-Data {
+    param (
+        [string]$path
+    )
     try {
-        if (Test-Path $regPath) {
-            Write-Log "Eliminando claves del registro en $regPath..."
-            Remove-Item -Path $regPath -Recurse -Force -ErrorAction Stop
-            Write-Log "Claves del registro eliminadas correctamente."
-        } else {
-            Write-Log "No se encontraron claves del registro en $regPath."
+        if (-not (Test-Path $backupPath)) {
+            New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+        }
+        if (Test-Path $path) {
+            Write-Log "Realizando backup de ${path}..."
+            Copy-Item -Path $path -Destination "$backupPath" -Recurse -Force
+            Write-Log "Backup completado: ${path}."
         }
     } catch {
-        Write-Log "Error al eliminar las claves del registro: $_" -level "ERROR"
-        throw
+        Write-Log "Error al realizar backup de ${path}: $_" -level "ERROR"
     }
 }
 
-# Función para eliminar archivos de configuración
-function Remove-ConfigFiles {
-    try {
-        if (Test-Path $appDataPath) {
-            Write-Log "Eliminando archivos de configuración en $appDataPath..."
-            Remove-Item -Path $appDataPath -Recurse -Force -ErrorAction Stop
-            Write-Log "Archivos de configuración eliminados correctamente."
-        } else {
-            Write-Log "No se encontraron archivos de configuración en $appDataPath."
+# Función para buscar claves del registro relacionadas con HWMonitor
+function Search-RegistryForHWMonitor {
+    Write-Log "Buscando claves del registro relacionadas con '$searchKeyword'..."
+    $foundKeys = @()
+
+    foreach ($hive in "HKCU", "HKLM") {
+        try {
+            $keys = Get-ChildItem -Path "${hive}:\Software" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*$searchKeyword*" }
+            if ($keys) {
+                foreach ($key in $keys) {
+                    Write-Log "Clave encontrada: $($key.PSPath)"
+                    $foundKeys += $key.PSPath
+                }
+            }
+        } catch {
+            Write-Log "Error al buscar en el registro: $_" -level "ERROR"
         }
-    } catch {
-        Write-Log "Error al eliminar los archivos de configuración: $_" -level "ERROR"
-        throw
-    }
-}
-
-# Función principal
-function Reset-HWMonitorTrial {
-    Write-Log "Iniciando script $scriptName..."
-    Write-Log "Buscando y eliminando rastros de HWMonitor Pro..."
-
-    try {
-        # Detener procesos de HWMonitor
-        Stop-HWMonitorProcesses
-
-        # Eliminar claves del registro
-        Remove-RegistryKeys
-
-        # Eliminar archivos de configuración
-        Remove-ConfigFiles
-
-        Write-Log "Período de prueba de HWMonitor Pro restablecido correctamente."
-    } catch {
-        Write-Log "Error crítico durante la ejecución del script: $_" -level "ERROR"
-        Write-Log "El script no pudo completarse correctamente."
-        exit 1
     }
 
-    Write-Log "Script $scriptName finalizado."
+    if ($foundKeys.Count -eq 0) {
+        Write-Log "No se encontraron claves relacionadas con '$searchKeyword'."
+    } else {
+        Write-Log "Total de claves encontradas: $($foundKeys.Count)"
+    }
+
+    return $foundKeys
 }
 
-# Ejecutar la función principal
-Reset-HWMonitorTrial
+# Función para buscar archivos relacionados con HWMonitor
+function Search-FilesForHWMonitor {
+    Write-Log "Buscando archivos relacionados con '$searchKeyword'..."
+    $foundFiles = @()
+
+    $pathsToSearch = @("$env:LocalAppData", "$env:ProgramData", "C:\Program Files", "C:\Program Files (x86)")
+
+    foreach ($path in $pathsToSearch) {
+        try {
+            $files = Get-ChildItem -Path $path -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*$searchKeyword*" }
+            if ($files) {
+                foreach ($file in $files) {
+                    Write-Log "Archivo encontrado: $($file.FullName)"
+                    $foundFiles += $file.FullName
+                }
+            }
+        } catch {
+            Write-Log "Error al buscar archivos en ${path}: $_" -level "ERROR"
+        }
+    }
+
+    if ($foundFiles.Count -eq 0) {
+        Write-Log "No se encontraron archivos relacionados con '$searchKeyword'."
+    } else {
+        Write-Log "Total de archivos encontrados: $($foundFiles.Count)"
+    }
+
+    return $foundFiles
+}
+
+# Ejecutar el script principal
+Write-Log "Iniciando script $scriptName..."
+Write-Log "Buscando y eliminando rastros de HWMonitor Pro..."
+
+try {
+    Stop-HWMonitorProcesses
+    Write-Log "Rastreo completado."
+} catch {
+    Write-Log "Error crítico durante la ejecución del script: $_" -level "ERROR"
+    Write-Log "El script no pudo completarse correctamente."
+    exit 1
+}
