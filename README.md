@@ -1,0 +1,1 @@
+# Reset-Periodo-Prueba-HWMonitor-Pro
